@@ -6,10 +6,14 @@ This is a simple script that runs multiple checkouts in parallel against a remot
 Usage
 -----
 
-Checkout, bundle install, edit the checkout.rb and set the domain, then:
+Checkout, bundle install: then:
 
 ````bash
-bundle exec ruby checkout.rb
+bundle exec ./checkout --help
+````
+
+````bash
+bundle exec ./checkout --url http://www.example.com
 ````
 
 YMMV

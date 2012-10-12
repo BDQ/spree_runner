@@ -1,0 +1,114 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require "bundler/setup"
+require 'capybara'
+require 'capybara/dsl'
+require 'capybara-webkit'
+require 'parallel'
+require 'faker'
+require 'trollop'
+
+opts = Trollop::options do
+  version "Spree Auto Checkout Bot. 0.1.0"
+  banner <<-EOS
+Spree Auto Checkout Bot: Add's randon product to cart, and checkout againist any stock Spree store checkout process (using BogusGateway).
+EOS
+  opt :url, "Base URL for server (something like: http://www.example.com)", :type => :string, :short => 'u'
+  opt :repeat, "Number of time to repeat checkout", :default => 100, :type => :integer, :short => 'r'
+  opt :concurrent, "Number of processes to use while checking out", :default => 2, :type => :integer, :short => 'c'
+end
+
+puts "Running #{opts[:repeat]} order(s), #{opts[:concurrent]} at a time against #{opts[:url]}"
+puts ''
+Trollop::die :url, "cannot be blank" if opts[:url].nil?
+
+
+Capybara.run_server = false
+Capybara.app_host = opts[:url]
+# Capybara.register_driver :webkit do |app|
+#   Capybara::Driver::Webkit.new(app, :ignore_ssl_errors => true)
+# end
+
+module SpreeRunner
+  class Checkout
+    def start(id)
+      begin
+        puts "#{id}: Starting session."
+        s = Capybara::Session.new(:webkit)
+
+        puts "#{id}: visiting root"
+        s.visit('/')
+
+
+
+        product_link = s.all('ul#products a[title]').sample
+        puts "#{id}: visiting random product"
+        product_link.click
+
+        puts "#{id}: adding to cart"
+        s.click_button('add-to-cart-button')
+
+        sleep 30
+        # puts s.driver.cookies['_little_bits_session']
+        puts "#{id}: checking out"
+        s.click_link('Checkout')
+
+        puts "#{id}: registering as guest"
+        s.fill_in('order_email', :with => Faker::Internet.email)
+        s.click_button('Continue')
+
+
+        puts "#{id}: filling in address"
+        s.fill_in('order_bill_address_attributes_firstname', :with => Faker::Name.first_name)
+        s.fill_in('order_bill_address_attributes_lastname', :with => Faker::Name.last_name)
+        s.fill_in('order_bill_address_attributes_address1', :with => Faker::Address.street_name)
+        s.fill_in('order_bill_address_attributes_city', :with => Faker::Address.city)
+        s.select(Faker::Address.state, :from => 'order_bill_address_attributes_state_id')
+        s.fill_in('order_bill_address_attributes_zipcode', :with => Faker::Address.zip_code)
+        s.fill_in('order_bill_address_attributes_phone', :with => Faker::PhoneNumber.phone_number)
+        s.check('order_use_billing')
+        s.click_button('Save and Continue')
+
+        puts "#{id}: selecting shipping"
+        # just use default
+        s.click_button('Save and Continue')
+
+        puts "#{id}: filling payment details"
+        s.fill_in('card_number', :with => '4111111111111111')
+        s.fill_in('card_code', :with => '123')
+        s.click_button('Save and Continue')
+
+
+        puts "#{id}: confirming"
+        s.click_button('Place Order')
+        # s.driver.render("#{id}.png")
+        #
+
+      rescue Exception => e
+        raise e
+      ensure
+        #we need to manually kill the webkit_server process as it doesn't go away itself
+        web_kit_pid =  s.driver.browser.instance_eval { @connection.instance_eval { @pid } }
+
+        #detach first to prevent zombie process
+        Process.detach web_kit_pid
+        #kill it!
+        Process.kill 'INT', web_kit_pid
+      end
+    end
+  end
+end
+
+
+Parallel.map((1..opts[:repeat]).to_a, :in_processes => opts[:concurrent]) do |i|
+  c = SpreeRunner::Checkout.new
+  begin
+    c.start(i)
+  rescue Exception => e
+    puts "#{i}: {FAILURE} = #{e.message}"
+    puts e.backtrace
+  end
+
+  Capybara.reset_sessions!
+end
