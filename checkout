@@ -34,32 +34,36 @@ module SpreeRunner
   class Checkout
     def start(id)
       begin
-        puts "#{id}: Starting session."
+        print "#{id}: Starting session.\n"
         s = Capybara::Session.new(:webkit)
 
-        puts "#{id}: visiting root"
+        print "#{id}: visiting root\n"
         s.visit('/')
 
+        print "#{id}: visiting random page\n"
+        pages = s.all('nav.pagination .page').count
+        page = rand(pages) + 1
+        s.visit("/?page=#{page}")
 
-
+        print "#{id}: visiting random product\n"
         product_link = s.all('ul#products a[title]').sample
-        puts "#{id}: visiting random product"
         product_link.click
 
-        puts "#{id}: adding to cart"
+        print "#{id}: adding to cart\n"
+        s.find('.add-to-cart input').set(rand(5)+1)
+
+        s.driver.render("#{id}-product.png")
         s.click_button('add-to-cart-button')
 
-        sleep 30
-        # puts s.driver.cookies['_little_bits_session']
-        puts "#{id}: checking out"
+        print "#{id}: checking out\n"
         s.click_link('Checkout')
 
-        puts "#{id}: registering as guest"
+        print "#{id}: registering as guest\n"
         s.fill_in('order_email', :with => Faker::Internet.email)
         s.click_button('Continue')
 
 
-        puts "#{id}: filling in address"
+        print "#{id}: filling in address\n"
         s.fill_in('order_bill_address_attributes_firstname', :with => Faker::Name.first_name)
         s.fill_in('order_bill_address_attributes_lastname', :with => Faker::Name.last_name)
         s.fill_in('order_bill_address_attributes_address1', :with => Faker::Address.street_name)
@@ -70,31 +74,35 @@ module SpreeRunner
         s.check('order_use_billing')
         s.click_button('Save and Continue')
 
-        puts "#{id}: selecting shipping"
+        print "#{id}: selecting shipping\n"
         # just use default
         s.click_button('Save and Continue')
 
-        puts "#{id}: filling payment details"
+        print "#{id}: filling payment details\n"
         s.fill_in('card_number', :with => '4111111111111111')
         s.fill_in('card_code', :with => '123')
         s.click_button('Save and Continue')
 
 
-        puts "#{id}: confirming"
+        print "#{id}: confirming\n"
         s.click_button('Place Order')
-        # s.driver.render("#{id}.png")
         #
 
       rescue Exception => e
         raise e
       ensure
-        #we need to manually kill the webkit_server process as it doesn't go away itself
-        web_kit_pid =  s.driver.browser.instance_eval { @connection.instance_eval { @pid } }
+        begin
+          s.driver.render("#{id}-error.png")
+          #we need to manually kill the webkit_server process as it doesn't go away itself
+          web_kit_pid =  s.driver.browser.instance_eval { @connection.instance_eval { @pid } }
 
-        #detach first to prevent zombie process
-        Process.detach web_kit_pid
-        #kill it!
-        Process.kill 'INT', web_kit_pid
+          #detach first to prevent zombie process
+          Process.detach web_kit_pid
+          #kill it!
+          Process.kill 'INT', web_kit_pid
+        rescue
+          #don't care if kill fails
+        end
       end
     end
   end
@@ -106,8 +114,8 @@ Parallel.map((1..opts[:repeat]).to_a, :in_processes => opts[:concurrent]) do |i|
   begin
     c.start(i)
   rescue Exception => e
-    puts "#{i}: {FAILURE} = #{e.message}"
-    puts e.backtrace
+    print "#{i}: {FAILURE} = #{e.message}\n"
+    print "#{e.backtrace}\n"
   end
 
   Capybara.reset_sessions!
